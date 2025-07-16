@@ -40,10 +40,11 @@ def analizar_df(df):
         elif detectar_estrellas(row):
             señales.append((i, 'Estrella'))
 
-    df['Envolvente'] = detectar_envuelta(df).fillna(False)
+    envolvente_series = detectar_envuelta(df).fillna(False)
 
-    for i in df[df['Envolvente']].index:
-        señales.append((i, 'Envolvente Alcista'))
+    for i, val in envolvente_series.items():
+        if val:  # 👈 aquí sí evaluamos cada valor booleano individualmente
+            señales.append((i, 'Envolvente Alcista'))
 
     return pd.DataFrame(señales, columns=['Fecha', 'Patrón'])
 
