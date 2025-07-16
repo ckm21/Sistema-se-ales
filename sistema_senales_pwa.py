@@ -4,7 +4,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 # ========================
-# Funciones de patrones
+# Funciones para detectar patrones
 # ========================
 
 def detectar_martillo(row):
@@ -27,6 +27,10 @@ def detectar_envuelta(df):
         (df['Close'] > df['Open'].shift(1))
     )
 
+# ========================
+# Función principal de análisis
+# ========================
+
 def analizar_df(df):
     señales = []
 
@@ -36,7 +40,7 @@ def analizar_df(df):
         elif detectar_estrellas(row):
             señales.append((i, 'Estrella'))
 
-    df['Envolvente'] = detectar_envuelta(df)
+    df['Envolvente'] = detectar_envuelta(df).fillna(False)
 
     for i in df[df['Envolvente']].index:
         señales.append((i, 'Envolvente Alcista'))
@@ -48,30 +52,30 @@ def analizar_df(df):
 # ========================
 
 st.title("📊 Sistema de Señales por Velas Japonesas")
+st.write("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
 
-ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
+ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", value="AMD")
 
 if ticker:
     try:
         fin = datetime.today()
         inicio = fin - timedelta(days=30)
 
-        df = yf.download(ticker, start=inicio, end=fin, interval='1d')
+        data = yf.download(ticker, start=inicio, end=fin)
 
-        if df.empty:
-            st.error("No se encontraron datos. Revisa el ticker.")
+        if data.empty:
+            st.warning("No se pudieron obtener datos para este ticker.")
         else:
-            df = df[['Open', 'High', 'Low', 'Close']]
             st.subheader("📈 Datos recientes")
-            st.dataframe(df.tail(10))
+            st.dataframe(data.tail(10))
 
-            resultado = analizar_df(df)
+            señales_df = analizar_df(data)
 
-            if resultado.empty:
-                st.info("No se detectaron señales.")
+            if not señales_df.empty:
+                st.subheader("🔔 Señales detectadas")
+                st.dataframe(señales_df)
             else:
-                st.success("Señales detectadas:")
-                st.dataframe(resultado)
+                st.info("No se detectaron patrones en los últimos días.")
 
     except Exception as e:
         st.error(f"Ocurrió un error: {e}")
