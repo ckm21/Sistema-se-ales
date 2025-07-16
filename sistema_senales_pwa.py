@@ -3,9 +3,9 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 
-# =============================
-# 🔍 Funciones para detectar patrones
-# =============================
+# ========================
+# Funciones de patrones
+# ========================
 
 def detectar_martillo(row):
     if row.isnull().any():
@@ -15,14 +15,6 @@ def detectar_martillo(row):
     mecha_superior = row['High'] - max(row['Open'], row['Close'])
     return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
 
-def detectar_envolvente(row, anterior):
-    if row.isnull().any() or anterior.isnull().any():
-        return False
-    return row['Open'] < row['Close'] and \
-           anterior['Open'] > anterior['Close'] and \
-           row['Open'] < anterior['Close'] and \
-           row['Close'] > anterior['Open']
-
 def detectar_estrella_fugaz(row):
     if row.isnull().any():
         return False
@@ -31,55 +23,55 @@ def detectar_estrella_fugaz(row):
     mecha_inferior = min(row['Open'], row['Close']) - row['Low']
     return mecha_superior > 2 * cuerpo and mecha_inferior < cuerpo
 
-# =============================
-# 🧠 Análisis de señales
-# =============================
+def detectar_envolvente(row, anterior):
+    if row.isnull().any() or anterior.isnull().any():
+        return False
+    return (
+        row['Open'] < row['Close'] and
+        anterior['Open'] > anterior['Close'] and
+        row['Open'] < anterior['Close'] and
+        row['Close'] > anterior['Open']
+    )
 
-def analizar_senales(df):
-    senales = []
-    for i in range(1, len(df)):
-        row = df.iloc[i]
-        anterior = df.iloc[i - 1]
-        if detectar_martillo(row):
-            senales.append((df.index[i], "📈 Martillo"))
-        elif detectar_envolvente(row, anterior):
-            senales.append((df.index[i], "🔁 Envolvente Alcista"))
-        elif detectar_estrella_fugaz(row):
-            senales.append((df.index[i], "📉 Estrella Fugaz"))
-    return senales
+# ========================
+# Interfaz Streamlit
+# ========================
 
-# =============================
-# 🚀 INTERFAZ STREAMLIT
-# =============================
-
-st.set_page_config(page_title="📊 Sistema de Señales por Velas", layout="centered")
 st.title("📊 Sistema de Señales por Velas Japonesas")
-st.markdown("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
+st.write("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
 
-ticker = st.text_input("🔎 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
+ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
 
 if ticker:
     try:
-        fin = datetime.today()
-        inicio = fin - timedelta(days=3)
-        df = yf.download(ticker, start=inicio, end=fin, interval="15m")
+        # Descarga los últimos 15 días por hora
+        datos = yf.download(ticker, period="15d", interval="1h")
 
-        if df.empty:
-            st.warning("No se pudo obtener información del ticker.")
+        if datos.empty:
+            st.warning("No se pudo obtener datos para el ticker proporcionado.")
         else:
-            df = df[['Open', 'High', 'Low', 'Close']]  # Limpiar columnas
-            senales = analizar_senales(df)
+            datos.reset_index(inplace=True)
+            senales = []
 
-            st.subheader(f"📅 Datos recientes de {ticker.upper()}")
-            st.dataframe(df.tail(5))
+            for i in range(1, len(datos)):
+                row = datos.iloc[i]
+                anterior = datos.iloc[i - 1]
 
-            st.subheader("📍 Señales detectadas")
+                if detectar_martillo(row):
+                    senales.append((row['Datetime'], "🔨 Martillo"))
+
+                if detectar_estrella_fugaz(row):
+                    senales.append((row['Datetime'], "🌠 Estrella Fugaz"))
+
+                if detectar_envolvente(row, anterior):
+                    senales.append((row['Datetime'], "📦 Envolvente Alcista"))
+
             if senales:
-                for fecha, señal in senales[-5:]:
-                    st.write(f"{fecha} - {señal}")
+                st.success("📈 Señales detectadas:")
+                for tiempo, tipo in senales:
+                    st.write(f"- {tiempo.strftime('%Y-%m-%d %H:%M')} — {tipo}")
             else:
-                st.info("No se detectaron señales en los últimos datos.")
+                st.info("No se detectaron señales en el periodo analizado.")
 
-            st.caption("⏱ Actualización cada 15 minutos.")
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Ocurrió un error: {e}")
