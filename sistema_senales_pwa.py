@@ -75,13 +75,16 @@ if ticker:
     )])
 
     # --- MOSTRAR NOTIFICACIONES ---
-    ultima_senal = señales[-1][0] if señales else "Sin señal clara"
-    if "Compra" in ultima_senal:
-        st.success(f"✅ Opción de compra detectada: {ultima_senal}")
-    elif "Venta" in ultima_senal:
-        st.warning(f"⚠️ Riesgo de pérdida: {ultima_senal}")
-    elif "Doji" in ultima_senal:
-        st.info(f"📍 Indecisión del mercado: {ultima_senal}")
+    st.markdown("### 📢 Notificaciones")
+
+    if señales:
+        ultima_senal = señales[-1][0]
+        if "Compra" in ultima_senal:
+            st.success(f"✅ Opción de compra detectada: {ultima_senal}")
+        elif "Venta" in ultima_senal:
+            st.warning(f"⚠️ Riesgo de pérdida: {ultima_senal}")
+        elif "Doji" in ultima_senal:
+            st.info(f"📍 Indecisión del mercado: {ultima_senal}")
     else:
         st.info("Sin señales relevantes en la última vela.")
 
@@ -100,22 +103,26 @@ if ticker:
     # --- DETALLE DE TENDENCIA ---
     st.markdown(f"### Tendencia detectada: **{tendencia}**")
 
-    # --- ESTRATEGIA ---
+    # --- ESTRATEGIA DOCUMENTADA ---
     with st.expander("📘 Estrategia aplicada"):
         st.markdown("""
-        **Compra:**
-        - Velas con cuerpo fuerte y cierre mayor al anterior.
-        - Contexto de tendencia alcista o inicio de impulso tras consolidación.
+        **🟢 Señal de Compra:**  
+        - Vela con cuerpo fuerte verde (cierre > apertura).  
+        - Cuerpo > 60% de la mecha total.  
+        - Cierre superior al cierre anterior.
 
-        **Venta:**
-        - Cuerpos bajistas consecutivos o con cierre por debajo del anterior.
-        - Mechas largas en velas verdes (señal de agotamiento).
-        - Presión vendedora tras subida rápida.
+        **🔴 Señal de Venta:**  
+        - Vela roja fuerte (cierre < apertura).  
+        - Cuerpo > 60% de la mecha total.  
+        - Cierre inferior al cierre anterior.
 
-        **Doji:**
-        - Señal de pausa o indecisión. Evitar operar en esa zona.
+        **⚠️ Doji:**  
+        - Vela con cuerpo muy pequeño.  
+        - Indecisión del mercado.  
+        - Evitar operar en ese momento.
 
-        **Tendencia:**
-        - Si es alcista se pueden mantener posiciones.
-        - Si es bajista, solo operar con rebotes tácticos bien definidos.
+        **Tendencia general:**  
+        - 📈 Alcista: preferencia por mantener o comprar.  
+        - 📉 Bajista: evitar compras, solo rebotes muy claros.  
+        - 🔄 Lateral: operar con cautela solo si hay señal fuerte.
         """)
