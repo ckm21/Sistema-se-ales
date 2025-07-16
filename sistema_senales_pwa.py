@@ -20,7 +20,7 @@ if data.empty:
     st.stop()
 
 data.reset_index(inplace=True)
-data.columns = [col.lower() for col in data.columns]
+data.columns = [col.lower() if col is not None else '' for col in data.columns]
 
 # Detectar tendencia simple
 def detectar_tendencia(df):
