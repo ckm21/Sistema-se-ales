@@ -1,101 +1,90 @@
-# sistema_senales.py
-
 import streamlit as st
 import pandas as pd
-import yfinance as yf
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
+import numpy as np
+from datetime import datetime
 
-# ========== Funciones de patrones ==========
+# =====================================
+# 📊 Funciones para detectar patrones
+# =====================================
 
 def detectar_martillo(row):
     cuerpo = abs(row['Close'] - row['Open'])
     mecha_inferior = min(row['Open'], row['Close']) - row['Low']
     mecha_superior = row['High'] - max(row['Open'], row['Close'])
-    return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
+    return (mecha_inferior > 2 * cuerpo) and (mecha_superior < cuerpo)
 
-def detectar_estrellas(row):
+def detectar_estrella_fugaz(row):
     cuerpo = abs(row['Close'] - row['Open'])
-    mecha_inferior = min(row['High'] - row['Open'], row['High'] - row['Close'])
-    mecha_superior = min(row['Open'] - row['Low'], row['Close'] - row['Low'])
-    return mecha_superior > 2 * cuerpo and mecha_inferior < cuerpo
+    mecha_superior = row['High'] - max(row['Open'], row['Close'])
+    mecha_inferior = min(row['Open'], row['Close']) - row['Low']
+    return (mecha_superior > 2 * cuerpo) and (mecha_inferior < cuerpo)
 
 def detectar_envolvente(df):
-    envolvente = (df['Close'].shift(1) < df['Open'].shift(1)) & \
-                 (df['Close'] > df['Open']) & \
-                 (df['Close'] > df['Open'].shift(1)) & \
-                 (df['Open'] < df['Close'].shift(1))
-    return envolvente
+    return ((df['Close'].shift(1) < df['Open'].shift(1)) &
+            (df['Open'] < df['Close']) &
+            (df['Close'] > df['Open'].shift(1)) &
+            (df['Open'] < df['Close'].shift(1)))
 
-def detectar_doji(row):
-    cuerpo = abs(row['Close'] - row['Open'])
-    rango_total = row['High'] - row['Low']
-    return cuerpo < 0.1 * rango_total
-
-# ========== Análisis de DataFrame ==========
+# =====================================
+# 🧠 Análisis del DataFrame
+# =====================================
 
 def analizar_df(df):
     señales = []
-
-    for i, row in df.iterrows():
-        if detectar_martillo(row):
-            señales.append((i, 'Martillo'))
-        if detectar_estrellas(row):
-            señales.append((i, 'Estrella'))
-        if detectar_doji(row):
-            señales.append((i, 'Doji'))
 
     df['Envolvente'] = detectar_envolvente(df)
     for i in df[df['Envolvente']].index:
         señales.append((i, 'Envolvente Alcista'))
 
+    for i, row in df.iterrows():
+        if detectar_martillo(row):
+            señales.append((i, 'Martillo'))
+        elif detectar_estrella_fugaz(row):
+            señales.append((i, 'Estrella Fugaz'))
+
     return pd.DataFrame(señales, columns=['Fecha', 'Patrón'])
 
-# ========== Interfaz de Streamlit ==========
+# =====================================
+# 🎛️ Interfaz de Streamlit
+# =====================================
 
-st.title("📊 Sistema de Señales por Velas Japonesas")
-st.write("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
+st.set_page_config(page_title="Sistema de Velas", layout="centered")
+st.title("📈 Sistema de Señales por Velas Japonesas")
 
-ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", value="AMD")
+# Entrada de usuario (ticker ficticio)
+ticker = st.text_input("🔍 Escribe un ticker (simulado):", value="AMD")
+dias = st.slider("Cantidad de días de datos simulados:", 10, 100, 30)
 
-if ticker:
-    try:
-        df = yf.download(ticker, period="1mo", interval="1d")
-        df = df[['Open', 'High', 'Low', 'Close']]
-        st.subheader("📉 Datos recientes")
-        st.dataframe(df.tail(10))
+# Simulación de datos OHLC
+np.random.seed(42)
+base = 100
+precio = base + np.random.randn(dias).cumsum()
+high = precio + np.random.rand(dias)*2
+low = precio - np.random.rand(dias)*2
+open_ = precio + (np.random.rand(dias)-0.5)
+close = precio + (np.random.rand(dias)-0.5)
+fechas = pd.date_range(end=datetime.today(), periods=dias)
 
-        señales = analizar_df(df)
+df = pd.DataFrame({
+    'Date': fechas,
+    'Open': open_,
+    'High': high,
+    'Low': low,
+    'Close': close
+}).set_index('Date')
 
-        if not señales.empty:
-            st.subheader("📌 Señales detectadas")
-            st.dataframe(señales)
+# Mostrar datos
+st.subheader("📋 Datos recientes")
+st.dataframe(df)
 
-            # ========== Gráfico ==========
-            fig = go.Figure(data=[go.Candlestick(
-                x=df.index,
-                open=df['Open'],
-                high=df['High'],
-                low=df['Low'],
-                close=df['Close'],
-                name='Velas'
-            )])
+# Detectar patrones
+try:
+    resultados = analizar_df(df)
 
-            for _, row in señales.iterrows():
-                fig.add_trace(go.Scatter(
-                    x=[row['Fecha']],
-                    y=[df.loc[row['Fecha'], 'Close']],
-                    mode="markers+text",
-                    text=[row['Patrón']],
-                    textposition="top center",
-                    marker=dict(size=10, color='red'),
-                    name=row['Patrón']
-                ))
-
-            st.plotly_chart(fig)
-
-        else:
-            st.info("No se detectaron señales en los últimos 30 días.")
-
-    except Exception as e:
-        st.error(f"Ocurrió un error: {e}")
+    st.subheader("💡 Señales detectadas")
+    if resultados.empty:
+        st.info("No se detectaron patrones.")
+    else:
+        st.dataframe(resultados)
+except Exception as e:
+    st.error(f"❌ Error durante el análisis: {e}")
