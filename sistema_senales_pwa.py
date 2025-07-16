@@ -1,95 +1,99 @@
-import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
+import streamlit as st
+from datetime import datetime, timedelta
 
-# ---------------------- Funciones para detectar velas ----------------------
-
-def detectar_martillo(row):
-    cuerpo = abs(row['Open'] - row['Close'])
-    mecha_inferior = np.minimum(row['Open'], row['Close']) - row['Low']
-    mecha_superior = row['High'] - np.maximum(row['Open'], row['Close'])
-    return cuerpo < mecha_inferior and mecha_superior < cuerpo
-
-def detectar_estrella_fugaz(row):
-    cuerpo = abs(row['Open'] - row['Close'])
-    mecha_superior = row['High'] - np.maximum(row['Open'], row['Close'])
-    mecha_inferior = np.minimum(row['Open'], row['Close']) - row['Low']
-    return cuerpo < mecha_superior and mecha_inferior < cuerpo
-
-def detectar_doji(row):
-    return abs(row['Open'] - row['Close']) <= 0.05 * (row['High'] - row['Low'])
-
-# ---------------------- Análisis del DataFrame ----------------------
-
-def analizar_df(df):
-    df['Martillo'] = df.apply(detectar_martillo, axis=1)
-    df['Estrella_Fugaz'] = df.apply(detectar_estrella_fugaz, axis=1)
-    df['Doji'] = df.apply(detectar_doji, axis=1)
-    return df
-
-# ---------------------- Detección de tendencia ----------------------
-
-def detectar_tendencia(df):
-    tendencia = "Lateral"
-    if df['Close'].iloc[-1] > df['Close'].iloc[0] * 1.02:
-        tendencia = "📈 Tendencia Alcista"
-    elif df['Close'].iloc[-1] < df['Close'].iloc[0] * 0.98:
-        tendencia = "📉 Tendencia Bajista"
-    return tendencia
-
-# ---------------------- Visualización con Plotly ----------------------
-
-def crear_grafico_velas(df):
-    fig = go.Figure(data=[go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close']
-    )])
-    fig.update_layout(title='Gráfico de Velas Japonesas', xaxis_title='Fecha', yaxis_title='Precio')
-    return fig
-
-# ---------------------- Interfaz de Streamlit ----------------------
-
+# Configuración inicial
+st.set_page_config(page_title="Señales por Velas", layout="wide")
 st.title("📈 Sistema de Señales por Velas Japonesas")
 
-ticker = st.text_input("🔍 Escribe un ticker (simulado o real):", value="AMD")
-dias = st.slider("Cantidad de días de datos:", min_value=10, max_value=100, value=20)
+# Entradas
+ticker = st.text_input("Ticker de la acción:", value="AAPL")
+interval = st.selectbox("Intervalo de tiempo", ["1m", "5m", "15m", "30m", "1h", "1d", "1wk"], index=2)
+period = st.selectbox("Periodo de análisis", ["1d", "5d", "7d", "1mo"], index=1)
 
-# Obtener datos desde Yahoo Finance
-try:
-    df = yf.download(ticker, period=f"{dias}d", interval="1d")
-    df = df[['Open', 'High', 'Low', 'Close']]
-    df = df.dropna()
-    df = analizar_df(df)
-    
-    # Notificación superior
-    ultima_fila = df.iloc[-1]
-    mensaje = ""
-    if ultima_fila['Martillo']:
-        mensaje = "🟢 Opción de Compra (Martillo detectado)"
-    elif ultima_fila['Estrella_Fugaz']:
-        mensaje = "🔴 Riesgo de Pérdida (Estrella Fugaz detectada)"
-    elif ultima_fila['Doji']:
-        mensaje = "⚠️ Indecisión del mercado (Doji detectado)"
+# Obtener datos
+data = yf.download(ticker, period=period, interval=interval)
+if data.empty:
+    st.warning("No se pudieron obtener datos.")
+    st.stop()
 
-    tendencia_actual = detectar_tendencia(df)
+data.reset_index(inplace=True)
+data.columns = [col.lower() for col in data.columns]
 
-    # Cuadro superior de alerta
-    if mensaje:
-        st.info(f"📢 {mensaje} | {tendencia_actual}")
+# Detectar tendencia simple
+def detectar_tendencia(df):
+    if df['close'].iloc[-1] > df['close'].iloc[-5]:
+        return "📈 Alcista"
+    elif df['close'].iloc[-1] < df['close'].iloc[-5]:
+        return "📉 Bajista"
     else:
-        st.info(f"📊 Sin señales claras | {tendencia_actual}")
+        return "⏸️ Lateral"
 
-    # Mostrar tabla y gráfico
-    st.subheader("📋 Datos recientes")
-    st.dataframe(df.tail(10))
+# Detectar patrones de velas
+def detectar_patrones(df):
+    señales = []
 
-    st.subheader("📊 Gráfico de Velas")
-    st.plotly_chart(crear_grafico_velas(df), use_container_width=True)
+    for i in range(1, len(df)):
+        o = df['open'].iloc[i]
+        c = df['close'].iloc[i]
+        h = df['high'].iloc[i]
+        l = df['low'].iloc[i]
+        prev_o = df['open'].iloc[i-1]
+        prev_c = df['close'].iloc[i-1]
 
-except Exception as e:
-    st.error(f"Ocurrió un error al obtener o analizar los datos: {e}")
+        cuerpo = abs(c - o)
+        mecha_superior = h - max(c, o)
+        mecha_inferior = min(c, o) - l
+
+        # Martillo
+        if cuerpo < (mecha_inferior * 0.5) and mecha_inferior > cuerpo * 2:
+            señales.append(("📌 Martillo", df['datetime'].iloc[i]))
+
+        # Envolvente alcista
+        elif c > o and prev_c < prev_o and c > prev_o and o < prev_c:
+            señales.append(("🟢 Envolvente Alcista", df['datetime'].iloc[i]))
+
+        # Doji
+        elif cuerpo <= (h - l) * 0.1:
+            señales.append(("⚠️ Doji", df['datetime'].iloc[i]))
+
+    return señales
+
+# Visualización
+fig = go.Figure(data=[go.Candlestick(
+    x=data['datetime'],
+    open=data['open'],
+    high=data['high'],
+    low=data['low'],
+    close=data['close'],
+    increasing_line_color='green',
+    decreasing_line_color='red'
+)])
+
+fig.update_layout(title=f"{ticker} - Velas ({interval})", xaxis_rangeslider_visible=False)
+
+# Mostrar gráfico
+st.plotly_chart(fig, use_container_width=True)
+
+# Mostrar tendencia
+tendencia = detectar_tendencia(data)
+st.subheader(f"Tendencia: {tendencia}")
+
+# Detectar señales
+señales = detectar_patrones(data)
+ultima_senal = señales[-1][0] if señales else None
+
+# Mostrar notificación destacada
+if ultima_senal == "🟢 Envolvente Alcista" or ultima_senal == "📌 Martillo":
+    st.success("✅ Señal clara de *compra* detectada.")
+elif ultima_senal == "⚠️ Doji":
+    st.warning("⚠️ Incertidumbre en el mercado. Evaluar riesgo.")
+else:
+    st.info("🔎 Sin señal clara de entrada o salida.")
+
+# Mostrar tabla de señales detectadas
+if señales:
+    df_señales = pd.DataFrame(señales, columns=["Patrón", "Fecha"])
+    st.dataframe(df_señales.tail(5), use_container_width=True)
