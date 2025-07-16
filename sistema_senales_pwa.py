@@ -1,128 +1,88 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
-import plotly.graph_objs as go
+import pandas as pd
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+from PIL import Image
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Señales de Velas", layout="wide")
+# Cargar imagen (logo)
+st.set_page_config(page_title="Sistema de Señales", page_icon="🐢")
+logo = Image.open("tortuga.png")
+st.image(logo, width=80)
 
-# --- LOGO O IMAGEN DE INICIO ---
-st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/3d/Green_Sea_Turtle_2.jpg/320px-Green_Sea_Turtle_2.jpg", width=100)
+# Título
+st.title("📉 Sistema de Señales por Velas Japonesas")
+st.markdown("**Versión 2.0 – Monitoreo de señales de entrada y salida según velas japonesas y tendencias.**")
 
-# --- TÍTULO PRINCIPAL ---
-st.title("🐢 Estrategia de Velas Japonesas")
-st.markdown("Versión 2.0 – Monitoreo de señales de entrada y salida según velas japonesas y tendencias.")
+# Inputs
+ticker = st.text_input("📌 Ingresa el ticker:", value="AMD")
+intervalo = st.selectbox("🕒 Intervalo de tiempo", ["15m", "30m", "1h", "4h", "1d"])
+periodo = st.selectbox("📅 Periodo de análisis", ["1d", "5d", "7d", "1mo", "3mo"])
 
-# --- ENTRADA DE TICKER Y DATOS ---
-ticker = st.text_input("📈 Ingresa el ticker:", value="AMD").upper()
-interval = st.selectbox("⏱️ Intervalo de tiempo", options=["1m", "5m", "15m", "1h", "4h", "1d"], index=4)
+# Obtener datos
+@st.cache_data
+def obtener_datos(ticker, intervalo, periodo):
+    data = yf.download(ticker, interval=intervalo, period=periodo)
+    data.columns = [col.lower() for col in data.columns]
+    return data
 
-end_date = datetime.now()
-start_date = end_date - timedelta(days=10)
+# Detección de señales
+def detectar_senales(df):
+    df = df.copy()
+    df["señal_compra"] = False
+    df["señal_venta"] = False
+    df["tendencia"] = "Indefinida"
 
+    for i in range(1, len(df)):
+        open_, close, high, low = df.iloc[i][["open", "close", "high", "low"]]
+        cuerpo = abs(close - open_)
+        mecha = high - low
+
+        try:
+            if cuerpo < mecha * 0.2:
+                if close > open_ and df.iloc[i - 1]["close"] < df.iloc[i - 1]["open"]:
+                    df.at[df.index[i], "señal_compra"] = True
+                elif close < open_ and df.iloc[i - 1]["close"] > df.iloc[i - 1]["open"]:
+                    df.at[df.index[i], "señal_venta"] = True
+        except:
+            continue
+
+        if i >= 3:
+            if df["close"].iloc[i] > df["close"].iloc[i - 1] > df["close"].iloc[i - 2]:
+                df.at[df.index[i], "tendencia"] = "Alcista"
+            elif df["close"].iloc[i] < df["close"].iloc[i - 1] < df["close"].iloc[i - 2]:
+                df.at[df.index[i], "tendencia"] = "Bajista"
+            else:
+                df.at[df.index[i], "tendencia"] = "Lateral"
+
+    return df
+
+# Mostrar resultados
 if ticker:
     try:
-        df = yf.download(ticker, start=start_date, end=end_date, interval=interval)
-        df.dropna(inplace=True)
-    except Exception as e:
-        st.error(f"Error al descargar los datos: {e}")
-        st.stop()
-
-    # --- DETECCIÓN DE TENDENCIA ---
-    def detectar_tendencia(data):
-        ultimos_cierres = data['Close'].tail(5)
-        if ultimos_cierres.is_monotonic_increasing:
-            return "📈 Alcista"
-        elif ultimos_cierres.is_monotonic_decreasing:
-            return "📉 Bajista"
+        datos = obtener_datos(ticker, intervalo, periodo)
+        if datos.empty:
+            st.warning("No se encontraron datos. Verifica el ticker o el periodo.")
         else:
-            return "🔄 Lateral"
+            df_resultado = detectar_senales(datos)
+            st.subheader("📊 Gráfico de velas")
+            fig, ax = plt.subplots(figsize=(10, 5))
 
-    # --- DETECCIÓN DE SEÑALES ---
-    def detectar_senales(data):
-        señales = []
-        for i in range(1, len(data)):
-            open_ = data['Open'].iloc[i]
-            close = data['Close'].iloc[i]
-            prev_close = data['Close'].iloc[i-1]
-            high = data['High'].iloc[i]
-            low = data['Low'].iloc[i]
+            for i in range(len(df_resultado)):
+                o = df_resultado["open"].iloc[i]
+                c = df_resultado["close"].iloc[i]
+                h = df_resultado["high"].iloc[i]
+                l = df_resultado["low"].iloc[i]
+                color = "green" if c > o else "red"
+                ax.plot([i, i], [l, h], color="black")
+                ax.plot([i, i], [o, c], color=color, linewidth=5)
 
-            cuerpo = abs(close - open_)
-            mecha = high - low
+            ax.set_xticks(range(0, len(df_resultado), max(1, len(df_resultado)//10)))
+            ax.set_xticklabels(df_resultado.index.strftime('%m-%d %H:%M')[::max(1, len(df_resultado)//10)], rotation=45)
+            st.pyplot(fig)
 
-            if cuerpo < mecha * 0.2:
-                señales.append(("⚠️ Doji", i))
-            elif close > open_ and cuerpo > mecha * 0.6 and close > prev_close:
-                señales.append(("🟢 Señal de Compra", i))
-            elif open_ > close and cuerpo > mecha * 0.6 and close < prev_close:
-                señales.append(("🔴 Señal de Venta", i))
-        return señales
-
-    señales = detectar_senales(df)
-    tendencia = detectar_tendencia(df)
-
-    # --- GRAFICAR CON PLOTLY ---
-    fig = go.Figure(data=[go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        increasing_line_color='green',
-        decreasing_line_color='red'
-    )])
-
-    # --- MOSTRAR NOTIFICACIONES ---
-    st.markdown("### 📢 Notificaciones")
-
-    if señales:
-        ultima_senal = señales[-1][0]
-        if "Compra" in ultima_senal:
-            st.success(f"✅ Opción de compra detectada: {ultima_senal}")
-        elif "Venta" in ultima_senal:
-            st.warning(f"⚠️ Riesgo de pérdida: {ultima_senal}")
-        elif "Doji" in ultima_senal:
-            st.info(f"📍 Indecisión del mercado: {ultima_senal}")
-    else:
-        st.info("Sin señales relevantes en la última vela.")
-
-    # --- MOSTRAR GRÁFICO ---
-    st.plotly_chart(fig, use_container_width=True)
-
-    # --- TABLA DE DATOS Y SEÑALES ---
-    st.subheader("📊 Señales detectadas")
-    if señales:
-        df_señales = pd.DataFrame(señales, columns=["Señal", "Index"])
-        df_señales["Fecha"] = df.index[df_señales["Index"]].values
-        st.dataframe(df_señales[["Fecha", "Señal"]])
-    else:
-        st.write("No se detectaron señales claras.")
-
-    # --- DETALLE DE TENDENCIA ---
-    st.markdown(f"### Tendencia detectada: **{tendencia}**")
-
-    # --- ESTRATEGIA DOCUMENTADA ---
-    with st.expander("📘 Estrategia aplicada"):
-        st.markdown("""
-        **🟢 Señal de Compra:**  
-        - Vela con cuerpo fuerte verde (cierre > apertura).  
-        - Cuerpo > 60% de la mecha total.  
-        - Cierre superior al cierre anterior.
-
-        **🔴 Señal de Venta:**  
-        - Vela roja fuerte (cierre < apertura).  
-        - Cuerpo > 60% de la mecha total.  
-        - Cierre inferior al cierre anterior.
-
-        **⚠️ Doji:**  
-        - Vela con cuerpo muy pequeño.  
-        - Indecisión del mercado.  
-        - Evitar operar en ese momento.
-
-        **Tendencia general:**  
-        - 📈 Alcista: preferencia por mantener o comprar.  
-        - 📉 Bajista: evitar compras, solo rebotes muy claros.  
-        - 🔄 Lateral: operar con cautela solo si hay señal fuerte.
-        """)
+            st.subheader("📌 Últimas señales detectadas")
+            ultimas = df_resultado[df_resultado["señal_compra"] | df_resultado["señal_venta"]].tail(5)
+            st.dataframe(ultimas[["open", "close", "señal_compra", "señal_venta", "tendencia"]])
+    except Exception as e:
+        st.error(f"Ocurrió un error: {e}")
