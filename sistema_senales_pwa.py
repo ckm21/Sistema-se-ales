@@ -3,48 +3,68 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 
+# ---------------------------
 # Funciones de patrones
+# ---------------------------
+
 def detectar_martillo(row):
-    cuerpo = abs(row['Close'] - row['Open'])
+    if not all(k in row for k in ['Open', 'Close', 'High', 'Low']):
+        return False
+    cuerpo = abs(row['Open'] - row['Close'])
     mecha_inferior = min(row['Open'], row['Close']) - row['Low']
     mecha_superior = row['High'] - max(row['Open'], row['Close'])
-    return mecha_inferior > cuerpo * 2 and mecha_superior < cuerpo
+    return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
 
 def detectar_estrella_fugaz(row):
-    cuerpo = abs(row['Close'] - row['Open'])
+    if not all(k in row for k in ['Open', 'Close', 'High', 'Low']):
+        return False
+    cuerpo = abs(row['Open'] - row['Close'])
     mecha_superior = row['High'] - max(row['Open'], row['Close'])
     mecha_inferior = min(row['Open'], row['Close']) - row['Low']
-    return mecha_superior > cuerpo * 2 and mecha_inferior < cuerpo
+    return mecha_superior > 2 * cuerpo and mecha_inferior < cuerpo
 
-def detectar_envolvente_bajista(df, i):
+def detectar_envuelta_alcista(df, i):
     if i == 0:
         return False
-    prev = df.iloc[i - 1]
-    curr = df.iloc[i]
-    return (
-        prev['Close'] > prev['Open'] and
-        curr['Close'] < curr['Open'] and
-        curr['Open'] > prev['Close'] and
-        curr['Close'] < prev['Open']
-    )
+    anterior = df.iloc[i - 1]
+    actual = df.iloc[i]
+    return anterior['Close'] < anterior['Open'] and actual['Close'] > actual['Open'] and actual['Close'] > anterior['Open'] and actual['Open'] < anterior['Close']
 
-# Configuración de la app
-st.set_page_config(page_title="Sistema de Señales Reales", layout="centered")
-st.title("📈 Sistema de Señales con Velas Reales")
+# ---------------------------
+# Interfaz
+# ---------------------------
+
+st.title("📊 Sistema de Señales por Velas")
+st.write("Este sistema muestra recomendaciones de compra y venta basadas en patrones de velas japonesas.")
 
 ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", value="AMD")
 
 if ticker:
-    # Descargar datos reales
-    datos = yf.download(ticker, period="1d", interval="15m")
-    if datos.empty:
-        st.warning("No se encontraron datos para ese ticker.")
-    else:
-        datos = datos.reset_index()
+    try:
+        df = yf.download(ticker, interval="15m", period="1d")
+        df = df.rename(columns={'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close'})
 
-        # Detectar señales
-        senales = []
-        for i, row in datos.iterrows():
-            s = []
-            if detectar_martillo(row): s.append("🟢 Martillo")
-            if detectar_estrella_fugaz(row): s.appen
+        if not df.empty:
+            df.reset_index(inplace=True)
+            df['Hora'] = df['Datetime'].dt.strftime('%H:%M')
+            df['Señal'] = ""
+
+            for i in range(len(df)):
+                row = df.iloc[i]
+                señales = []
+
+                if detectar_martillo(row):
+                    señales.append('Martillo')
+                if detectar_estrella_fugaz(row):
+                    señales.append('Estrella Fugaz')
+                if detectar_envuelta_alcista(df, i):
+                    señales.append('Envuelta Alcista')
+
+                df.at[i, 'Señal'] = ", ".join(señales)
+
+            st.dataframe(df[['Hora', 'Open', 'Close', 'High', 'Low', 'Volume', 'Señal']])
+            st.info("🔔 El sistema se actualizará cada 15 minutos con nuevas señales.")
+        else:
+            st.warning("⚠️ No se encontraron datos para este ticker.")
+    except Exception as e:
+        st.error(f"Error al cargar los datos: {e}")
