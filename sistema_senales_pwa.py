@@ -1,99 +1,108 @@
-import yfinance as yf
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
-from datetime import datetime, timedelta
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import plotly.graph_objects as go
 
-# Configuración inicial
-st.set_page_config(page_title="Señales por Velas", layout="wide")
-st.title("📈 Sistema de Señales por Velas Japonesas")
+# Funciones de análisis de velas
+def detectar_martillo(row):
+    cuerpo = abs(row['close'] - row['open'])
+    mecha_inferior = row['open'] - row['low'] if row['close'] > row['open'] else row['close'] - row['low']
+    mecha_superior = row['high'] - row['close'] if row['close'] > row['open'] else row['high'] - row['open']
+    return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
 
-# Entradas
-ticker = st.text_input("Ticker de la acción:", value="AAPL")
-interval = st.selectbox("Intervalo de tiempo", ["1m", "5m", "15m", "30m", "1h", "1d", "1wk"], index=2)
-period = st.selectbox("Periodo de análisis", ["1d", "5d", "7d", "1mo"], index=1)
+def detectar_env_bajista(row_anterior, row_actual):
+    return row_anterior['close'] > row_anterior['open'] and row_actual['close'] < row_actual['open'] and row_actual['open'] > row_anterior['close'] and row_actual['close'] < row_anterior['open']
 
-# Obtener datos
-data = yf.download(ticker, period=period, interval=interval)
-if data.empty:
-    st.warning("No se pudieron obtener datos.")
-    st.stop()
-
-data.reset_index(inplace=True)
-data.columns = [col.lower() if col is not None else '' for col in data.columns]
+def detectar_env_alcista(row_anterior, row_actual):
+    return row_anterior['close'] < row_anterior['open'] and row_actual['close'] > row_actual['open'] and row_actual['open'] < row_anterior['close'] and row_actual['close'] > row_anterior['open']
 
 # Detectar tendencia simple
 def detectar_tendencia(df):
-    if df['close'].iloc[-1] > df['close'].iloc[-5]:
-        return "📈 Alcista"
-    elif df['close'].iloc[-1] < df['close'].iloc[-5]:
-        return "📉 Bajista"
+    if len(df) < 5:
+        return "📉 Muy pocos datos"
+    ventana = df['close'].rolling(window=5)
+    if df['close'].iloc[-1] > ventana.mean().iloc[-1]:
+        return "📈 Tendencia alcista"
     else:
-        return "⏸️ Lateral"
+        return "📉 Tendencia bajista"
 
-# Detectar patrones de velas
-def detectar_patrones(df):
-    señales = []
+# Analizar el DataFrame y añadir columnas de señales
+def analizar_df(df):
+    df['Martillo'] = df.apply(detectar_martillo, axis=1)
+    df['EnvBajista'] = False
+    df['EnvAlcista'] = False
 
     for i in range(1, len(df)):
-        o = df['open'].iloc[i]
-        c = df['close'].iloc[i]
-        h = df['high'].iloc[i]
-        l = df['low'].iloc[i]
-        prev_o = df['open'].iloc[i-1]
-        prev_c = df['close'].iloc[i-1]
+        df.loc[i, 'EnvBajista'] = detectar_env_bajista(df.iloc[i-1], df.iloc[i])
+        df.loc[i, 'EnvAlcista'] = detectar_env_alcista(df.iloc[i-1], df.iloc[i])
+    
+    return df
 
-        cuerpo = abs(c - o)
-        mecha_superior = h - max(c, o)
-        mecha_inferior = min(c, o) - l
+# Gráfico
+def graficar(df):
+    fig = go.Figure(data=[go.Candlestick(
+        x=df.index,
+        open=df['open'],
+        high=df['high'],
+        low=df['low'],
+        close=df['close'],
+        name='Velas'
+    )])
 
-        # Martillo
-        if cuerpo < (mecha_inferior * 0.5) and mecha_inferior > cuerpo * 2:
-            señales.append(("📌 Martillo", df['datetime'].iloc[i]))
+    señales_compra = df[df['Martillo'] | df['EnvAlcista']]
+    señales_venta = df[df['EnvBajista']]
 
-        # Envolvente alcista
-        elif c > o and prev_c < prev_o and c > prev_o and o < prev_c:
-            señales.append(("🟢 Envolvente Alcista", df['datetime'].iloc[i]))
+    fig.add_trace(go.Scatter(
+        x=señales_compra.index,
+        y=señales_compra['close'],
+        mode='markers',
+        marker=dict(symbol='arrow-up', color='green', size=10),
+        name='Compra'
+    ))
 
-        # Doji
-        elif cuerpo <= (h - l) * 0.1:
-            señales.append(("⚠️ Doji", df['datetime'].iloc[i]))
+    fig.add_trace(go.Scatter(
+        x=señales_venta.index,
+        y=señales_venta['close'],
+        mode='markers',
+        marker=dict(symbol='arrow-down', color='red', size=10),
+        name='Venta'
+    ))
 
-    return señales
+    return fig
 
-# Visualización
-fig = go.Figure(data=[go.Candlestick(
-    x=data['datetime'],
-    open=data['open'],
-    high=data['high'],
-    low=data['low'],
-    close=data['close'],
-    increasing_line_color='green',
-    decreasing_line_color='red'
-)])
+# INTERFAZ STREAMLIT
+st.title("📉 Sistema de Señales por Velas Japonesas")
 
-fig.update_layout(title=f"{ticker} - Velas ({interval})", xaxis_rangeslider_visible=False)
+ticker = st.text_input("Ticker de la acción:", "AAPL")
+intervalo = st.selectbox("Intervalo de tiempo", ["15m", "30m", "1h", "1d"])
+periodo = st.selectbox("Periodo de análisis", ["1d", "5d", "7d", "1mo"])
 
-# Mostrar gráfico
-st.plotly_chart(fig, use_container_width=True)
+if ticker:
+    data = yf.download(tickers=ticker, period=periodo, interval=intervalo)
 
-# Mostrar tendencia
-tendencia = detectar_tendencia(data)
-st.subheader(f"Tendencia: {tendencia}")
+    if data.empty:
+        st.error("No se pudo obtener datos para ese ticker.")
+    else:
+        # Validar columnas
+        if any(col is None for col in data.columns):
+            st.error("Algunas columnas son inválidas.")
+        else:
+            data.columns = [col.lower() for col in data.columns]
+            df = data.copy()
+            df_signals = analizar_df(df)
+            tendencia = detectar_tendencia(df)
 
-# Detectar señales
-señales = detectar_patrones(data)
-ultima_senal = señales[-1][0] if señales else None
+            # Recuadro superior con señal clara
+            if df_signals['Martillo'].iloc[-1] or df_signals['EnvAlcista'].iloc[-1]:
+                st.success("🟢 Opción de compra detectada (señal alcista)")
+            elif df_signals['EnvBajista'].iloc[-1]:
+                st.error("🔴 Riesgo de pérdida detectado (señal bajista)")
+            else:
+                st.warning("⚠️ Sin señales claras")
 
-# Mostrar notificación destacada
-if ultima_senal == "🟢 Envolvente Alcista" or ultima_senal == "📌 Martillo":
-    st.success("✅ Señal clara de *compra* detectada.")
-elif ultima_senal == "⚠️ Doji":
-    st.warning("⚠️ Incertidumbre en el mercado. Evaluar riesgo.")
-else:
-    st.info("🔎 Sin señal clara de entrada o salida.")
+            st.subheader("📊 Tendencia actual:")
+            st.write(tendencia)
 
-# Mostrar tabla de señales detectadas
-if señales:
-    df_señales = pd.DataFrame(señales, columns=["Patrón", "Fecha"])
-    st.dataframe(df_señales.tail(5), use_container_width=True)
+            st.plotly_chart(graficar(df_signals), use_container_width=True)
+            st.dataframe(df_signals.tail(20))
