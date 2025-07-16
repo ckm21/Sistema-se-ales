@@ -1,7 +1,18 @@
 import streamlit as st
 import pandas as pd
-import yfinance as yf
-from datetime import datetime, timedelta
+
+# ========================
+# Datos simulados de ejemplo
+# ========================
+datos = {
+    "Fecha": ["2025-07-15", "2025-07-16", "2025-07-17"],
+    "Open": [150.0, 152.0, 151.0],
+    "High": [155.0, 153.0, 156.0],
+    "Low": [148.0, 150.0, 149.5],
+    "Close": [154.5, 150.5, 155.5]
+}
+df = pd.DataFrame(datos)
+df.set_index("Fecha", inplace=True)
 
 # ========================
 # Funciones para detectar patrones
@@ -21,24 +32,45 @@ def detectar_estrellas(row):
 
 def detectar_envuelta(df):
     return (
-        (df['Close'].shift(1) < df['Open'].shift(1)) &  # Día 1 bajista
-        (df['Close'] > df['Open']) &  # Día 2 alcista
-        (df['Open'] < df['Close'].shift(1)) &  # Día 2 abre por debajo del cierre anterior
-        (df['Close'] > df['Open'].shift(1))  # Día 2 cierra por encima de la apertura anterior
+        (df['Close'].shift(1) < df['Open'].shift(1)) &
+        (df['Close'] > df['Open']) &
+        (df['Open'] < df['Close'].shift(1)) &
+        (df['Close'] > df['Open'].shift(1))
     )
 
 # ========================
-# Función principal
+# Análisis de patrones
 # ========================
 
-def analizar_patrones(ticker):
-    try:
-        hoy = datetime.today()
-        inicio = hoy - timedelta(days=30)
+def analizar_df(df):
+    señales = []
 
-        df = yf.download(ticker, start=inicio, end=hoy, interval="1d")
+    for i, row in df.iterrows():
+        if detectar_martillo(row):
+            señales.append((i, 'Martillo'))
+        elif detectar_estrellas(row):
+            señales.append((i, 'Estrella'))
 
-        if df.empty:
-            return "No se encontraron datos", pd.DataFrame()
+    df['Envolvente'] = detectar_envuelta(df)
 
-        df = df[['Open
+    for i in df[df['Envolvente']].index:
+        señales.append((i, 'Envolvente Alcista'))
+
+    return pd.DataFrame(señales, columns=['Fecha', 'Patrón'])
+
+# ========================
+# Interfaz Streamlit
+# ========================
+
+st.title("📊 Sistema de Señales por Velas Japonesas (Versión Local)")
+st.markdown("Este sistema usa un ejemplo simulado para detectar patrones clásicos de velas.")
+
+st.dataframe(df)
+
+resultado = analizar_df(df)
+
+if resultado.empty:
+    st.info("No se detectaron señales.")
+else:
+    st.success("Señales detectadas:")
+    st.dataframe(resultado)
