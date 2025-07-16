@@ -3,68 +3,83 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 
-# ---------------------------
-# Funciones de patrones
-# ---------------------------
+# =============================
+# 🔍 Funciones para detectar patrones
+# =============================
 
 def detectar_martillo(row):
-    if not all(k in row for k in ['Open', 'Close', 'High', 'Low']):
+    if row.isnull().any():
         return False
-    cuerpo = abs(row['Open'] - row['Close'])
+    cuerpo = abs(row['Close'] - row['Open'])
     mecha_inferior = min(row['Open'], row['Close']) - row['Low']
     mecha_superior = row['High'] - max(row['Open'], row['Close'])
     return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
 
-def detectar_estrella_fugaz(row):
-    if not all(k in row for k in ['Open', 'Close', 'High', 'Low']):
+def detectar_envolvente(row, anterior):
+    if row.isnull().any() or anterior.isnull().any():
         return False
-    cuerpo = abs(row['Open'] - row['Close'])
+    return row['Open'] < row['Close'] and \
+           anterior['Open'] > anterior['Close'] and \
+           row['Open'] < anterior['Close'] and \
+           row['Close'] > anterior['Open']
+
+def detectar_estrella_fugaz(row):
+    if row.isnull().any():
+        return False
+    cuerpo = abs(row['Close'] - row['Open'])
     mecha_superior = row['High'] - max(row['Open'], row['Close'])
     mecha_inferior = min(row['Open'], row['Close']) - row['Low']
     return mecha_superior > 2 * cuerpo and mecha_inferior < cuerpo
 
-def detectar_envuelta_alcista(df, i):
-    if i == 0:
-        return False
-    anterior = df.iloc[i - 1]
-    actual = df.iloc[i]
-    return anterior['Close'] < anterior['Open'] and actual['Close'] > actual['Open'] and actual['Close'] > anterior['Open'] and actual['Open'] < anterior['Close']
+# =============================
+# 🧠 Análisis de señales
+# =============================
 
-# ---------------------------
-# Interfaz
-# ---------------------------
+def analizar_senales(df):
+    senales = []
+    for i in range(1, len(df)):
+        row = df.iloc[i]
+        anterior = df.iloc[i - 1]
+        if detectar_martillo(row):
+            senales.append((df.index[i], "📈 Martillo"))
+        elif detectar_envolvente(row, anterior):
+            senales.append((df.index[i], "🔁 Envolvente Alcista"))
+        elif detectar_estrella_fugaz(row):
+            senales.append((df.index[i], "📉 Estrella Fugaz"))
+    return senales
 
-st.title("📊 Sistema de Señales por Velas")
-st.write("Este sistema muestra recomendaciones de compra y venta basadas en patrones de velas japonesas.")
+# =============================
+# 🚀 INTERFAZ STREAMLIT
+# =============================
 
-ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", value="AMD")
+st.set_page_config(page_title="📊 Sistema de Señales por Velas", layout="centered")
+st.title("📊 Sistema de Señales por Velas Japonesas")
+st.markdown("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
+
+ticker = st.text_input("🔎 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
 
 if ticker:
     try:
-        df = yf.download(ticker, interval="15m", period="1d")
-        df = df.rename(columns={'Open': 'Open', 'High': 'High', 'Low': 'Low', 'Close': 'Close'})
+        fin = datetime.today()
+        inicio = fin - timedelta(days=3)
+        df = yf.download(ticker, start=inicio, end=fin, interval="15m")
 
-        if not df.empty:
-            df.reset_index(inplace=True)
-            df['Hora'] = df['Datetime'].dt.strftime('%H:%M')
-            df['Señal'] = ""
-
-            for i in range(len(df)):
-                row = df.iloc[i]
-                señales = []
-
-                if detectar_martillo(row):
-                    señales.append('Martillo')
-                if detectar_estrella_fugaz(row):
-                    señales.append('Estrella Fugaz')
-                if detectar_envuelta_alcista(df, i):
-                    señales.append('Envuelta Alcista')
-
-                df.at[i, 'Señal'] = ", ".join(señales)
-
-            st.dataframe(df[['Hora', 'Open', 'Close', 'High', 'Low', 'Volume', 'Señal']])
-            st.info("🔔 El sistema se actualizará cada 15 minutos con nuevas señales.")
+        if df.empty:
+            st.warning("No se pudo obtener información del ticker.")
         else:
-            st.warning("⚠️ No se encontraron datos para este ticker.")
+            df = df[['Open', 'High', 'Low', 'Close']]  # Limpiar columnas
+            senales = analizar_senales(df)
+
+            st.subheader(f"📅 Datos recientes de {ticker.upper()}")
+            st.dataframe(df.tail(5))
+
+            st.subheader("📍 Señales detectadas")
+            if senales:
+                for fecha, señal in senales[-5:]:
+                    st.write(f"{fecha} - {señal}")
+            else:
+                st.info("No se detectaron señales en los últimos datos.")
+
+            st.caption("⏱ Actualización cada 15 minutos.")
     except Exception as e:
-        st.error(f"Error al cargar los datos: {e}")
+        st.error(f"Error: {str(e)}")
