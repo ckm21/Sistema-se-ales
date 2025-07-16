@@ -1,108 +1,108 @@
+import yfinance as yf
 import streamlit as st
 import pandas as pd
-import numpy as np
-import yfinance as yf
 import plotly.graph_objects as go
 
-# Funciones de análisis de velas
-def detectar_martillo(row):
-    cuerpo = abs(row['close'] - row['open'])
-    mecha_inferior = row['open'] - row['low'] if row['close'] > row['open'] else row['close'] - row['low']
-    mecha_superior = row['high'] - row['close'] if row['close'] > row['open'] else row['high'] - row['open']
-    return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
+# Configuración de la app
+st.set_page_config(layout="wide")
+st.title("📈 Analizador de Velas Japonesas – Estrategia Tortuga 🐢")
 
-def detectar_env_bajista(row_anterior, row_actual):
-    return row_anterior['close'] > row_anterior['open'] and row_actual['close'] < row_actual['open'] and row_actual['open'] > row_anterior['close'] and row_actual['close'] < row_anterior['open']
+# Tickers disponibles
+tickers = ["AMD", "AAPL", "MSFT", "GOOGL", "META", "PFE", "LLY"]
+ticker = st.selectbox("Selecciona una acción:", tickers)
 
-def detectar_env_alcista(row_anterior, row_actual):
-    return row_anterior['close'] < row_anterior['open'] and row_actual['close'] > row_actual['open'] and row_actual['open'] < row_anterior['close'] and row_actual['close'] > row_anterior['open']
+# Intervalos y rangos de tiempo
+interval = st.selectbox("Intervalo de tiempo:", ["1m", "5m", "15m", "1h", "4h", "1d"])
+period = st.selectbox("Rango de datos:", ["1d", "5d", "7d", "1mo"])
 
-# Detectar tendencia simple
-def detectar_tendencia(df):
-    if len(df) < 5:
-        return "📉 Muy pocos datos"
-    ventana = df['close'].rolling(window=5)
-    if df['close'].iloc[-1] > ventana.mean().iloc[-1]:
-        return "📈 Tendencia alcista"
-    else:
-        return "📉 Tendencia bajista"
+# Descargar datos
+data = yf.download(ticker, interval=interval, period=period)
+data.dropna(inplace=True)
 
-# Analizar el DataFrame y añadir columnas de señales
-def analizar_df(df):
-    df['Martillo'] = df.apply(detectar_martillo, axis=1)
-    df['EnvBajista'] = False
-    df['EnvAlcista'] = False
+# Detectar patrones
+def detectar_martillo(df):
+    cuerpo = abs(df["Close"] - df["Open"])
+    mecha_inferior = df["Open"] - df["Low"]
+    mecha_superior = df["High"] - df["Close"]
+    return (mecha_inferior > cuerpo * 2) & (mecha_superior < cuerpo)
 
-    for i in range(1, len(df)):
-        df.loc[i, 'EnvBajista'] = detectar_env_bajista(df.iloc[i-1], df.iloc[i])
-        df.loc[i, 'EnvAlcista'] = detectar_env_alcista(df.iloc[i-1], df.iloc[i])
-    
-    return df
+def detectar_estrella_fugaz(df):
+    cuerpo = abs(df["Close"] - df["Open"])
+    mecha_superior = df["High"] - df[["Close", "Open"]].max(axis=1)
+    mecha_inferior = df[["Close", "Open"]].min(axis=1) - df["Low"]
+    return (mecha_superior > cuerpo * 2) & (mecha_inferior < cuerpo)
 
-# Gráfico
-def graficar(df):
-    fig = go.Figure(data=[go.Candlestick(
-        x=df.index,
-        open=df['open'],
-        high=df['high'],
-        low=df['low'],
-        close=df['close'],
-        name='Velas'
-    )])
+def detectar_doji(df):
+    return abs(df["Close"] - df["Open"]) <= ((df["High"] - df["Low"]) * 0.1)
 
-    señales_compra = df[df['Martillo'] | df['EnvAlcista']]
-    señales_venta = df[df['EnvBajista']]
+# Agregar señales
+data["Martillo"] = detectar_martillo(data)
+data["Estrella"] = detectar_estrella_fugaz(data)
+data["Doji"] = detectar_doji(data)
 
-    fig.add_trace(go.Scatter(
-        x=señales_compra.index,
-        y=señales_compra['close'],
-        mode='markers',
-        marker=dict(symbol='arrow-up', color='green', size=10),
-        name='Compra'
-    ))
+# Detección de tendencia
+if data["Close"].iloc[-1] > data["Close"].iloc[0]:
+    tendencia = "📈 Tendencia Alcista"
+else:
+    tendencia = "📉 Tendencia Bajista"
 
-    fig.add_trace(go.Scatter(
-        x=señales_venta.index,
-        y=señales_venta['close'],
-        mode='markers',
-        marker=dict(symbol='arrow-down', color='red', size=10),
-        name='Venta'
-    ))
+# Mostrar gráfica
+fig = go.Figure(data=[go.Candlestick(
+    x=data.index,
+    open=data['Open'],
+    high=data['High'],
+    low=data['Low'],
+    close=data['Close'],
+    name='Velas'
+)])
 
-    return fig
+# Agregar patrones a la gráfica
+for i in range(len(data)):
+    if data["Martillo"].iloc[i]:
+        fig.add_trace(go.Scatter(x=[data.index[i]], y=[data["Low"].iloc[i]],
+                                 mode="markers", marker=dict(color="green", size=10),
+                                 name="Martillo"))
+    if data["Estrella"].iloc[i]:
+        fig.add_trace(go.Scatter(x=[data.index[i]], y=[data["High"].iloc[i]],
+                                 mode="markers", marker=dict(color="red", size=10),
+                                 name="Estrella Fugaz"))
+    if data["Doji"].iloc[i]:
+        fig.add_trace(go.Scatter(x=[data.index[i]], y=[(data["High"].iloc[i] + data["Low"].iloc[i]) / 2],
+                                 mode="markers", marker=dict(color="orange", size=10),
+                                 name="Doji"))
 
-# INTERFAZ STREAMLIT
-st.title("📉 Sistema de Señales por Velas Japonesas")
+# Layout
+fig.update_layout(title=f"Gráfico de Velas para {ticker} ({interval})",
+                  xaxis_title="Fecha",
+                  yaxis_title="Precio")
 
-ticker = st.text_input("Ticker de la acción:", "AAPL")
-intervalo = st.selectbox("Intervalo de tiempo", ["15m", "30m", "1h", "1d"])
-periodo = st.selectbox("Periodo de análisis", ["1d", "5d", "7d", "1mo"])
+st.plotly_chart(fig, use_container_width=True)
 
-if ticker:
-    data = yf.download(tickers=ticker, period=periodo, interval=intervalo)
+# Mostrar notificación de señales
+ultima_fila = data.iloc[-1]
+mensaje = ""
 
-    if data.empty:
-        st.error("No se pudo obtener datos para ese ticker.")
-    else:
-        # Validar columnas
-        if any(col is None for col in data.columns):
-            st.error("Algunas columnas son inválidas.")
-        else:
-            data.columns = [col.lower() for col in data.columns]
-            df = data.copy()
-            df_signals = analizar_df(df)
-            tendencia = detectar_tendencia(df)
+if ultima_fila["Martillo"]:
+    mensaje = "✅ Opción de Compra (Martillo)"
+elif ultima_fila["Estrella"]:
+    mensaje = "⚠️ Riesgo de Caída (Estrella Fugaz)"
+elif ultima_fila["Doji"]:
+    mensaje = "⚠️ Indecisión (Doji)"
 
-            # Recuadro superior con señal clara
-            if df_signals['Martillo'].iloc[-1] or df_signals['EnvAlcista'].iloc[-1]:
-                st.success("🟢 Opción de compra detectada (señal alcista)")
-            elif df_signals['EnvBajista'].iloc[-1]:
-                st.error("🔴 Riesgo de pérdida detectado (señal bajista)")
-            else:
-                st.warning("⚠️ Sin señales claras")
+if mensaje:
+    st.markdown(f"### 🔔 {mensaje}")
 
-            st.subheader("📊 Tendencia actual:")
-            st.write(tendencia)
+# Mostrar tendencia
+st.markdown(f"**Tendencia actual:** {tendencia}")
 
-            st.plotly_chart(graficar(df_signals), use_container_width=True)
-            st.dataframe(df_signals.tail(20))
+# Mostrar estrategia
+with st.expander("📘 Estrategia Tortuga (Versión 2.0)"):
+    st.markdown("""
+- ✅ **Entrada**: Solo en velas con cuerpo sólido luego de periodo estable.
+- ⚠️ **No operar**: En zonas de congestión, cuerpos cortos, o velas sin dirección clara.
+- 🔄 **Evaluación por velas**: 1m, 5m, 15m, 1h, 4h.
+- 🧠 **Salidas**: Señales de agotamiento, mechas largas o velas de indecisión.
+- 💰 **Objetivo de ganancia**: Entre +1.5% y +2.5% por operación táctica.
+- 💼 **Gestión de capital**: Operaciones de $10, $15 o $20.
+- 🧪 **Validación**: Antes de entrar o salir, validar con análisis multivelas.
+""")
