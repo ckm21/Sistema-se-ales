@@ -1,37 +1,38 @@
+# sistema_senales.py
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
 import plotly.graph_objects as go
-from io import BytesIO
+from datetime import datetime, timedelta
 
-# =========================
-# Funciones de patrones
-# =========================
+# ========== Funciones de patrones ==========
 
 def detectar_martillo(row):
     cuerpo = abs(row['Close'] - row['Open'])
-    mecha_inferior = row['Open'] - row['Low'] if row['Open'] < row['Close'] else row['Close'] - row['Low']
-    mecha_superior = row['High'] - row['Close'] if row['Open'] < row['Close'] else row['High'] - row['Open']
+    mecha_inferior = min(row['Open'], row['Close']) - row['Low']
+    mecha_superior = row['High'] - max(row['Open'], row['Close'])
     return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
 
 def detectar_estrellas(row):
     cuerpo = abs(row['Close'] - row['Open'])
-    mecha_inferior = min(row['Open'], row['Close']) - row['Low']
-    return mecha_inferior > 2 * cuerpo and mecha_inferior < cuerpo * 4
+    mecha_inferior = min(row['High'] - row['Open'], row['High'] - row['Close'])
+    mecha_superior = min(row['Open'] - row['Low'], row['Close'] - row['Low'])
+    return mecha_superior > 2 * cuerpo and mecha_inferior < cuerpo
 
-def detectar_envuelta(df):
-    envolvente = (
-        (df['Close'].shift(1) < df['Open'].shift(1)) &
-        (df['Open'] < df['Close']) &
-        (df['Open'] < df['Close'].shift(1)) &
-        (df['Close'] > df['Open'].shift(1))
-    )
+def detectar_envolvente(df):
+    envolvente = (df['Close'].shift(1) < df['Open'].shift(1)) & \
+                 (df['Close'] > df['Open']) & \
+                 (df['Close'] > df['Open'].shift(1)) & \
+                 (df['Open'] < df['Close'].shift(1))
     return envolvente
 
-# =========================
-# Análisis del DataFrame
-# =========================
+def detectar_doji(row):
+    cuerpo = abs(row['Close'] - row['Open'])
+    rango_total = row['High'] - row['Low']
+    return cuerpo < 0.1 * rango_total
+
+# ========== Análisis de DataFrame ==========
 
 def analizar_df(df):
     señales = []
@@ -39,89 +40,62 @@ def analizar_df(df):
     for i, row in df.iterrows():
         if detectar_martillo(row):
             señales.append((i, 'Martillo'))
-        elif detectar_estrellas(row):
+        if detectar_estrellas(row):
             señales.append((i, 'Estrella'))
+        if detectar_doji(row):
+            señales.append((i, 'Doji'))
 
-    envolvente_series = detectar_envuelta(df).fillna(False)
-    for i, val in envolvente_series.items():
-        if val:
-            señales.append((i, 'Envolvente Alcista'))
+    df['Envolvente'] = detectar_envolvente(df)
+    for i in df[df['Envolvente']].index:
+        señales.append((i, 'Envolvente Alcista'))
 
     return pd.DataFrame(señales, columns=['Fecha', 'Patrón'])
 
-# =========================
-# Visualización con Plotly
-# =========================
-
-def mostrar_grafico(df, señales):
-    fig = go.Figure(data=[go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        name='Velas'
-    )])
-
-    colores = {
-        'Martillo': 'blue',
-        'Estrella': 'orange',
-        'Envolvente Alcista': 'green'
-    }
-
-    for _, fila in señales.iterrows():
-        fecha = fila['Fecha']
-        patrón = fila['Patrón']
-        precio = df.loc[fecha]['Close']
-        fig.add_trace(go.Scatter(
-            x=[fecha],
-            y=[precio],
-            mode='markers+text',
-            name=patrón,
-            text=[patrón],
-            textposition="top center",
-            marker=dict(size=12, color=colores.get(patrón, 'black'), symbol='triangle-up')
-        ))
-
-    fig.update_layout(title="Gráfico de Velas Japonesas con Señales Detectadas", xaxis_title="Fecha", yaxis_title="Precio")
-    return fig
-
-# =========================
-# Interfaz Streamlit
-# =========================
+# ========== Interfaz de Streamlit ==========
 
 st.title("📊 Sistema de Señales por Velas Japonesas")
-st.markdown("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
+st.write("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
 
-ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
+ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", value="AMD")
 
 if ticker:
     try:
-        fin = datetime.today()
-        inicio = fin - timedelta(days=20)
-        df = yf.download(ticker, start=inicio, end=fin, interval="1d")
+        df = yf.download(ticker, period="1mo", interval="1d")
         df = df[['Open', 'High', 'Low', 'Close']]
-        st.subheader("📈 Datos recientes")
+        st.subheader("📉 Datos recientes")
         st.dataframe(df.tail(10))
 
         señales = analizar_df(df)
-        st.subheader("🔔 Señales detectadas")
-        st.dataframe(señales)
 
         if not señales.empty:
-            fig = mostrar_grafico(df, señales)
-            st.plotly_chart(fig, use_container_width=True)
+            st.subheader("📌 Señales detectadas")
+            st.dataframe(señales)
 
-            # Descarga como CSV
-            csv = señales.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Descargar señales en CSV",
-                data=csv,
-                file_name=f'senales_{ticker}.csv',
-                mime='text/csv'
-            )
+            # ========== Gráfico ==========
+            fig = go.Figure(data=[go.Candlestick(
+                x=df.index,
+                open=df['Open'],
+                high=df['High'],
+                low=df['Low'],
+                close=df['Close'],
+                name='Velas'
+            )])
+
+            for _, row in señales.iterrows():
+                fig.add_trace(go.Scatter(
+                    x=[row['Fecha']],
+                    y=[df.loc[row['Fecha'], 'Close']],
+                    mode="markers+text",
+                    text=[row['Patrón']],
+                    textposition="top center",
+                    marker=dict(size=10, color='red'),
+                    name=row['Patrón']
+                ))
+
+            st.plotly_chart(fig)
+
         else:
-            st.info("No se detectaron señales en los últimos días.")
+            st.info("No se detectaron señales en los últimos 30 días.")
 
     except Exception as e:
         st.error(f"Ocurrió un error: {e}")
