@@ -3,75 +3,65 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 
-# ========================
-# Funciones de patrones
-# ========================
-
+# === Funciones para detectar patrones de velas ===
 def detectar_martillo(row):
-    if row.isnull().any():
-        return False
     cuerpo = abs(row['Close'] - row['Open'])
     mecha_inferior = min(row['Open'], row['Close']) - row['Low']
     mecha_superior = row['High'] - max(row['Open'], row['Close'])
-    return mecha_inferior > 2 * cuerpo and mecha_superior < cuerpo
+    return (mecha_inferior > 2 * cuerpo) and (mecha_superior < cuerpo)
 
-def detectar_estrella_fugaz(row):
-    if row.isnull().any():
+def detectar_estrelladelamanana(df, i):
+    if i < 2:
         return False
-    cuerpo = abs(row['Close'] - row['Open'])
-    mecha_superior = row['High'] - max(row['Open'], row['Close'])
-    mecha_inferior = min(row['Open'], row['Close']) - row['Low']
-    return mecha_superior > 2 * cuerpo and mecha_inferior < cuerpo
-
-def detectar_envolvente(row, anterior):
-    if row.isnull().any() or anterior.isnull().any():
-        return False
+    c1, c2, c3 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
     return (
-        row['Open'] < row['Close'] and
-        anterior['Open'] > anterior['Close'] and
-        row['Open'] < anterior['Close'] and
-        row['Close'] > anterior['Open']
+        c1['Close'] < c1['Open'] and
+        abs(c2['Close'] - c2['Open']) < (c1['Open'] - c1['Close']) * 0.3 and
+        c3['Close'] > c3['Open'] and
+        c3['Close'] > ((c1['Open'] + c1['Close']) / 2)
     )
 
-# ========================
-# Interfaz Streamlit
-# ========================
+def detectar_envueltaalcista(df, i):
+    if i < 1:
+        return False
+    prev, curr = df.iloc[i-1], df.iloc[i]
+    return (
+        prev['Close'] < prev['Open'] and
+        curr['Open'] < prev['Close'] and
+        curr['Close'] > prev['Open']
+    )
 
+# === Interfaz Streamlit ===
+st.set_page_config(page_title="📊 Sistema de Señales por Velas", layout="centered")
 st.title("📊 Sistema de Señales por Velas Japonesas")
 st.write("Este sistema detecta patrones clásicos de velas para generar señales de compra o venta.")
 
-ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
+ticker = st.text_input("🔎 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
 
 if ticker:
     try:
-        # Descarga los últimos 15 días por hora
-        datos = yf.download(ticker, period="15d", interval="1h")
+        end = datetime.now()
+        start = end - timedelta(days=30)
+        df = yf.download(ticker, start=start, end=end, interval="1d")
 
-        if datos.empty:
-            st.warning("No se pudo obtener datos para el ticker proporcionado.")
+        if df.empty:
+            st.warning("No se encontraron datos para ese ticker.")
         else:
-            datos.reset_index(inplace=True)
-            senales = []
+            df = df[['Open', 'High', 'Low', 'Close']]
+            df.reset_index(inplace=True)
+            señales = []
 
-            for i in range(1, len(datos)):
-                row = datos.iloc[i]
-                anterior = datos.iloc[i - 1]
-
+            for i, row in df.iterrows():
+                señal = []
                 if detectar_martillo(row):
-                    senales.append((row['Datetime'], "🔨 Martillo"))
+                    señal.append("🟢 Martillo")
+                if detectar_estrelladelamanana(df, i):
+                    señal.append("🌅 Estrella Mañana")
+                if detectar_envueltaalcista(df, i):
+                    señal.append("📦 Envolvente Alcista")
+                señales.append(", ".join(señal) if señal else "—")
 
-                if detectar_estrella_fugaz(row):
-                    senales.append((row['Datetime'], "🌠 Estrella Fugaz"))
-
-                if detectar_envolvente(row, anterior):
-                    senales.append((row['Datetime'], "📦 Envolvente Alcista"))
-
-            if senales:
-                st.success("📈 Señales detectadas:")
-                for tiempo, tipo in senales:
-                    st.write(f"- {tiempo.strftime('%Y-%m-%d %H:%M')} — {tipo}")
-            else:
-                st.info("No se detectaron señales en el periodo analizado.")
-
+            df['Señales'] = señales
+            st.dataframe(df[['Date', 'Open', 'High', 'Low', 'Close', 'Señales']])
     except Exception as e:
         st.error(f"Ocurrió un error: {e}")
