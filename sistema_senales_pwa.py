@@ -1,28 +1,19 @@
 import streamlit as st
 import pandas as pd
+import yfinance as yf
+from datetime import datetime, timedelta
 
-# Simulación de datos (puedes reemplazar esto con datos reales luego)
-data = {
-    'Hora': ['08:30', '08:45', '09:00', '09:15'],
-    'Apertura': [150.12, 151.1, 150.6, 150.4],
-    'Cierre':   [151.1, 150.6, 150.65, 150.8],
-    'Máximo':   [151.4, 151.6, 151.2, 151.0],
-    'Mínimo':   [149.9, 150.3, 150.1, 150.3]
-}
-df = pd.DataFrame(data)
-
-# ------------------- Funciones de detección de patrones -------------------
-
+# Funciones de patrones
 def detectar_martillo(row):
-    cuerpo = abs(row['Cierre'] - row['Apertura'])
-    mecha_inferior = min(row['Apertura'], row['Cierre']) - row['Mínimo']
-    mecha_superior = row['Máximo'] - max(row['Apertura'], row['Cierre'])
+    cuerpo = abs(row['Close'] - row['Open'])
+    mecha_inferior = min(row['Open'], row['Close']) - row['Low']
+    mecha_superior = row['High'] - max(row['Open'], row['Close'])
     return mecha_inferior > cuerpo * 2 and mecha_superior < cuerpo
 
 def detectar_estrella_fugaz(row):
-    cuerpo = abs(row['Cierre'] - row['Apertura'])
-    mecha_superior = row['Máximo'] - max(row['Apertura'], row['Cierre'])
-    mecha_inferior = min(row['Apertura'], row['Cierre']) - row['Mínimo']
+    cuerpo = abs(row['Close'] - row['Open'])
+    mecha_superior = row['High'] - max(row['Open'], row['Close'])
+    mecha_inferior = min(row['Open'], row['Close']) - row['Low']
     return mecha_superior > cuerpo * 2 and mecha_inferior < cuerpo
 
 def detectar_envolvente_bajista(df, i):
@@ -31,30 +22,29 @@ def detectar_envolvente_bajista(df, i):
     prev = df.iloc[i - 1]
     curr = df.iloc[i]
     return (
-        prev['Cierre'] > prev['Apertura'] and
-        curr['Cierre'] < curr['Apertura'] and
-        curr['Apertura'] > prev['Cierre'] and
-        curr['Cierre'] < prev['Apertura']
+        prev['Close'] > prev['Open'] and
+        curr['Close'] < curr['Open'] and
+        curr['Open'] > prev['Close'] and
+        curr['Close'] < prev['Open']
     )
 
-# ------------------- Generar señales -------------------
+# Configuración de la app
+st.set_page_config(page_title="Sistema de Señales Reales", layout="centered")
+st.title("📈 Sistema de Señales con Velas Reales")
 
-senales = []
-for i, row in df.iterrows():
-    s = []
-    if detectar_martillo(row): s.append("🟢 Martillo")
-    if detectar_estrella_fugaz(row): s.append("🔻 Estrella fugaz")
-    if detectar_envolvente_bajista(df, i): s.append("⚠️ Envolvente bajista")
-    senales.append(", ".join(s) if s else "—")
+ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", value="AMD")
 
-df['Señal'] = senales
+if ticker:
+    # Descargar datos reales
+    datos = yf.download(ticker, period="1d", interval="15m")
+    if datos.empty:
+        st.warning("No se encontraron datos para ese ticker.")
+    else:
+        datos = datos.reset_index()
 
-# ------------------- Interfaz en Streamlit -------------------
-
-st.set_page_config(page_title="Sistema de Señales", layout="centered")
-st.title("📊 Sistema de Señales por Velas")
-st.write("Este sistema muestra recomendaciones de compra y venta basadas en patrones de velas japonesas.")
-
-st.dataframe(df, use_container_width=True)
-
-st.info("🔔 El sistema se actualizará cada 15 minutos con nuevas señales (modo simulado).")
+        # Detectar señales
+        senales = []
+        for i, row in datos.iterrows():
+            s = []
+            if detectar_martillo(row): s.append("🟢 Martillo")
+            if detectar_estrella_fugaz(row): s.appen
