@@ -1,108 +1,121 @@
-import yfinance as yf
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import yfinance as yf
+import plotly.graph_objs as go
+from datetime import datetime, timedelta
 
-# Configuración de la app
-st.set_page_config(layout="wide")
-st.title("📈 Analizador de Velas Japonesas – Estrategia Tortuga 🐢")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Señales de Velas", layout="wide")
 
-# Tickers disponibles
-tickers = ["AMD", "AAPL", "MSFT", "GOOGL", "META", "PFE", "LLY"]
-ticker = st.selectbox("Selecciona una acción:", tickers)
+# --- LOGO O IMAGEN DE INICIO ---
+st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/3d/Green_Sea_Turtle_2.jpg/320px-Green_Sea_Turtle_2.jpg", width=100)
 
-# Intervalos y rangos de tiempo
-interval = st.selectbox("Intervalo de tiempo:", ["1m", "5m", "15m", "1h", "4h", "1d"])
-period = st.selectbox("Rango de datos:", ["1d", "5d", "7d", "1mo"])
+# --- TÍTULO PRINCIPAL ---
+st.title("🐢 Estrategia de Velas Japonesas")
+st.markdown("Versión 2.0 – Monitoreo de señales de entrada y salida según velas japonesas y tendencias.")
 
-# Descargar datos
-data = yf.download(ticker, interval=interval, period=period)
-data.dropna(inplace=True)
+# --- ENTRADA DE TICKER Y DATOS ---
+ticker = st.text_input("📈 Ingresa el ticker:", value="AMD").upper()
+interval = st.selectbox("⏱️ Intervalo de tiempo", options=["1m", "5m", "15m", "1h", "4h", "1d"], index=4)
 
-# Detectar patrones
-def detectar_martillo(df):
-    cuerpo = abs(df["Close"] - df["Open"])
-    mecha_inferior = df["Open"] - df["Low"]
-    mecha_superior = df["High"] - df["Close"]
-    return (mecha_inferior > cuerpo * 2) & (mecha_superior < cuerpo)
+end_date = datetime.now()
+start_date = end_date - timedelta(days=10)
 
-def detectar_estrella_fugaz(df):
-    cuerpo = abs(df["Close"] - df["Open"])
-    mecha_superior = df["High"] - df[["Close", "Open"]].max(axis=1)
-    mecha_inferior = df[["Close", "Open"]].min(axis=1) - df["Low"]
-    return (mecha_superior > cuerpo * 2) & (mecha_inferior < cuerpo)
+if ticker:
+    try:
+        df = yf.download(ticker, start=start_date, end=end_date, interval=interval)
+        df.dropna(inplace=True)
+    except Exception as e:
+        st.error(f"Error al descargar los datos: {e}")
+        st.stop()
 
-def detectar_doji(df):
-    return abs(df["Close"] - df["Open"]) <= ((df["High"] - df["Low"]) * 0.1)
+    # --- DETECCIÓN DE TENDENCIA ---
+    def detectar_tendencia(data):
+        ultimos_cierres = data['Close'].tail(5)
+        if ultimos_cierres.is_monotonic_increasing:
+            return "📈 Alcista"
+        elif ultimos_cierres.is_monotonic_decreasing:
+            return "📉 Bajista"
+        else:
+            return "🔄 Lateral"
 
-# Agregar señales
-data["Martillo"] = detectar_martillo(data)
-data["Estrella"] = detectar_estrella_fugaz(data)
-data["Doji"] = detectar_doji(data)
+    # --- DETECCIÓN DE SEÑALES ---
+    def detectar_senales(data):
+        señales = []
+        for i in range(1, len(data)):
+            open_ = data['Open'].iloc[i]
+            close = data['Close'].iloc[i]
+            prev_close = data['Close'].iloc[i-1]
+            high = data['High'].iloc[i]
+            low = data['Low'].iloc[i]
 
-# Detección de tendencia
-if data["Close"].iloc[-1] > data["Close"].iloc[0]:
-    tendencia = "📈 Tendencia Alcista"
-else:
-    tendencia = "📉 Tendencia Bajista"
+            cuerpo = abs(close - open_)
+            mecha = high - low
 
-# Mostrar gráfica
-fig = go.Figure(data=[go.Candlestick(
-    x=data.index,
-    open=data['Open'],
-    high=data['High'],
-    low=data['Low'],
-    close=data['Close'],
-    name='Velas'
-)])
+            if cuerpo < mecha * 0.2:
+                señales.append(("⚠️ Doji", i))
+            elif close > open_ and cuerpo > mecha * 0.6 and close > prev_close:
+                señales.append(("🟢 Señal de Compra", i))
+            elif open_ > close and cuerpo > mecha * 0.6 and close < prev_close:
+                señales.append(("🔴 Señal de Venta", i))
+        return señales
 
-# Agregar patrones a la gráfica
-for i in range(len(data)):
-    if data["Martillo"].iloc[i]:
-        fig.add_trace(go.Scatter(x=[data.index[i]], y=[data["Low"].iloc[i]],
-                                 mode="markers", marker=dict(color="green", size=10),
-                                 name="Martillo"))
-    if data["Estrella"].iloc[i]:
-        fig.add_trace(go.Scatter(x=[data.index[i]], y=[data["High"].iloc[i]],
-                                 mode="markers", marker=dict(color="red", size=10),
-                                 name="Estrella Fugaz"))
-    if data["Doji"].iloc[i]:
-        fig.add_trace(go.Scatter(x=[data.index[i]], y=[(data["High"].iloc[i] + data["Low"].iloc[i]) / 2],
-                                 mode="markers", marker=dict(color="orange", size=10),
-                                 name="Doji"))
+    señales = detectar_senales(df)
+    tendencia = detectar_tendencia(df)
 
-# Layout
-fig.update_layout(title=f"Gráfico de Velas para {ticker} ({interval})",
-                  xaxis_title="Fecha",
-                  yaxis_title="Precio")
+    # --- GRAFICAR CON PLOTLY ---
+    fig = go.Figure(data=[go.Candlestick(
+        x=df.index,
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        increasing_line_color='green',
+        decreasing_line_color='red'
+    )])
 
-st.plotly_chart(fig, use_container_width=True)
+    # --- MOSTRAR NOTIFICACIONES ---
+    ultima_senal = señales[-1][0] if señales else "Sin señal clara"
+    if "Compra" in ultima_senal:
+        st.success(f"✅ Opción de compra detectada: {ultima_senal}")
+    elif "Venta" in ultima_senal:
+        st.warning(f"⚠️ Riesgo de pérdida: {ultima_senal}")
+    elif "Doji" in ultima_senal:
+        st.info(f"📍 Indecisión del mercado: {ultima_senal}")
+    else:
+        st.info("Sin señales relevantes en la última vela.")
 
-# Mostrar notificación de señales
-ultima_fila = data.iloc[-1]
-mensaje = ""
+    # --- MOSTRAR GRÁFICO ---
+    st.plotly_chart(fig, use_container_width=True)
 
-if ultima_fila["Martillo"]:
-    mensaje = "✅ Opción de Compra (Martillo)"
-elif ultima_fila["Estrella"]:
-    mensaje = "⚠️ Riesgo de Caída (Estrella Fugaz)"
-elif ultima_fila["Doji"]:
-    mensaje = "⚠️ Indecisión (Doji)"
+    # --- TABLA DE DATOS Y SEÑALES ---
+    st.subheader("📊 Señales detectadas")
+    if señales:
+        df_señales = pd.DataFrame(señales, columns=["Señal", "Index"])
+        df_señales["Fecha"] = df.index[df_señales["Index"]].values
+        st.dataframe(df_señales[["Fecha", "Señal"]])
+    else:
+        st.write("No se detectaron señales claras.")
 
-if mensaje:
-    st.markdown(f"### 🔔 {mensaje}")
+    # --- DETALLE DE TENDENCIA ---
+    st.markdown(f"### Tendencia detectada: **{tendencia}**")
 
-# Mostrar tendencia
-st.markdown(f"**Tendencia actual:** {tendencia}")
+    # --- ESTRATEGIA ---
+    with st.expander("📘 Estrategia aplicada"):
+        st.markdown("""
+        **Compra:**
+        - Velas con cuerpo fuerte y cierre mayor al anterior.
+        - Contexto de tendencia alcista o inicio de impulso tras consolidación.
 
-# Mostrar estrategia
-with st.expander("📘 Estrategia Tortuga (Versión 2.0)"):
-    st.markdown("""
-- ✅ **Entrada**: Solo en velas con cuerpo sólido luego de periodo estable.
-- ⚠️ **No operar**: En zonas de congestión, cuerpos cortos, o velas sin dirección clara.
-- 🔄 **Evaluación por velas**: 1m, 5m, 15m, 1h, 4h.
-- 🧠 **Salidas**: Señales de agotamiento, mechas largas o velas de indecisión.
-- 💰 **Objetivo de ganancia**: Entre +1.5% y +2.5% por operación táctica.
-- 💼 **Gestión de capital**: Operaciones de $10, $15 o $20.
-- 🧪 **Validación**: Antes de entrar o salir, validar con análisis multivelas.
-""")
+        **Venta:**
+        - Cuerpos bajistas consecutivos o con cierre por debajo del anterior.
+        - Mechas largas en velas verdes (señal de agotamiento).
+        - Presión vendedora tras subida rápida.
+
+        **Doji:**
+        - Señal de pausa o indecisión. Evitar operar en esa zona.
+
+        **Tendencia:**
+        - Si es alcista se pueden mantener posiciones.
+        - Si es bajista, solo operar con rebotes tácticos bien definidos.
+        """)
