@@ -1,21 +1,10 @@
 import streamlit as st
 import pandas as pd
+import yfinance as yf
+from datetime import datetime, timedelta
 
 # ========================
-# Datos simulados de ejemplo
-# ========================
-datos = {
-    "Fecha": ["2025-07-15", "2025-07-16", "2025-07-17"],
-    "Open": [150.0, 152.0, 151.0],
-    "High": [155.0, 153.0, 156.0],
-    "Low": [148.0, 150.0, 149.5],
-    "Close": [154.5, 150.5, 155.5]
-}
-df = pd.DataFrame(datos)
-df.set_index("Fecha", inplace=True)
-
-# ========================
-# Funciones para detectar patrones
+# Funciones de patrones
 # ========================
 
 def detectar_martillo(row):
@@ -38,10 +27,6 @@ def detectar_envuelta(df):
         (df['Close'] > df['Open'].shift(1))
     )
 
-# ========================
-# Análisis de patrones
-# ========================
-
 def analizar_df(df):
     señales = []
 
@@ -62,15 +47,31 @@ def analizar_df(df):
 # Interfaz Streamlit
 # ========================
 
-st.title("📊 Sistema de Señales por Velas Japonesas (Versión Local)")
-st.markdown("Este sistema usa un ejemplo simulado para detectar patrones clásicos de velas.")
+st.title("📊 Sistema de Señales por Velas Japonesas")
 
-st.dataframe(df)
+ticker = st.text_input("🔍 Escribe el ticker (ej. AMD, AAPL, MSFT)", "AMD")
 
-resultado = analizar_df(df)
+if ticker:
+    try:
+        fin = datetime.today()
+        inicio = fin - timedelta(days=30)
 
-if resultado.empty:
-    st.info("No se detectaron señales.")
-else:
-    st.success("Señales detectadas:")
-    st.dataframe(resultado)
+        df = yf.download(ticker, start=inicio, end=fin, interval='1d')
+
+        if df.empty:
+            st.error("No se encontraron datos. Revisa el ticker.")
+        else:
+            df = df[['Open', 'High', 'Low', 'Close']]
+            st.subheader("📈 Datos recientes")
+            st.dataframe(df.tail(10))
+
+            resultado = analizar_df(df)
+
+            if resultado.empty:
+                st.info("No se detectaron señales.")
+            else:
+                st.success("Señales detectadas:")
+                st.dataframe(resultado)
+
+    except Exception as e:
+        st.error(f"Ocurrió un error: {e}")
